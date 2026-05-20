@@ -1,130 +1,225 @@
+require("dotenv").config();
+
 const express = require("express");
+
 const productRoute = express.Router();
 
 const Product = require("./product.model");
 
-const cloudinary = require("cloudinary").v2;
 const multer = require("multer");
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
+
+const fs = require("fs");
+
+const { v2: cloudinary } = require("cloudinary");
 
 const { createInventoryForNewProduct } = require("./inventory.route");
 
-require("dotenv").config();
-
-// ================= CLOUDINARY =================
+// ================= CLOUDINARY CONFIG =================
 cloudinary.config({
   cloud_name: process.env.CLOUD_NAME,
+
   api_key: process.env.CLOUD_API_KEY,
+
   api_secret: process.env.CLOUD_API_SECRET,
 });
 
-// ================= STORAGE =================
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: "product_images",
-    allowed_formats: ["jpg", "jpeg", "png", "webp"],
-  },
+console.log("Cloudinary Ready");
+
+// ================= MULTER =================
+const upload = multer({
+  dest: "uploads/",
 });
 
-const upload = multer({ storage });
+// ================= GET MAX PID =================
+productRoute.get("/getmaxpid", async (req, res) => {
 
-// ================= ADD PRODUCT =================
-productRoute.post("/saveproductimage", upload.single("file"), async (req, res) => {
   try {
-    const lastProduct = await Product.findOne().sort({ pid: -1 });
-    const newPid = lastProduct ? lastProduct.pid + 1 : 1;
 
-    const product = new Product({
-      pid: newPid,
-      pname: req.body.pname,
-      pprice: req.body.pprice,
-      oprice: req.body.oprice,
-      pcatgid: req.body.pcatgid,
-      vid: req.body.vid,
-      status: "Active",
-      ppicname: req.file ? req.file.path : "", // ✅ Cloudinary URL
-    });
+    const products = await Product.find();
 
-    await product.save();
-
-    await createInventoryForNewProduct(product.pid, product.vid, 0, {
-      updatedBy: product.vid,
-    });
-
-    res.json({ message: "Product added", product });
+    res.send(products);
 
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: err.message });
+
+    res.status(500).json({
+      error: err.message,
+    });
   }
 });
-// ================= GET ALL PRODUCT IMAGES =================
-productRoute.get("/getproductimages", async (req, res) => {
+
+// ================= SAVE PRODUCT =================
+productRoute.post(
+  "/saveproductimage",
+
+  upload.single("file"),
+
+  async (req, res) => {
+
+    try {
+
+      console.log("BODY:", req.body);
+
+      console.log("FILE:", req.file);
+
+      let imageUrl = "";
+
+      // ================= CLOUDINARY UPLOAD =================
+      if (req.file) {
+
+        const result = await cloudinary.uploader.upload(
+          req.file.path,
+          {
+            folder: "product_images",
+          }
+        );
+
+        imageUrl = result.secure_url;
+
+        // delete temp file
+        fs.unlinkSync(req.file.path);
+      }
+
+      const lastProduct = await Product.findOne().sort({ pid: -1 });
+
+      const newPid = lastProduct ? lastProduct.pid + 1 : 1;
+
+      const product = new Product({
+        pid: newPid,
+
+        pname: req.body.pname,
+
+        pprice: req.body.pprice,
+
+        oprice: req.body.oprice,
+
+        pcatgid: req.body.pcatgid,
+
+        vid: req.body.vid,
+
+        status: "Active",
+
+        ppicname: imageUrl,
+      });
+
+      await product.save();
+
+      await createInventoryForNewProduct(
+        product.pid,
+        product.vid,
+        0,
+        {
+          updatedBy: product.vid,
+        }
+      );
+
+      res.json({
+        success: true,
+        message: "Product Added Successfully",
+        product,
+      });
+
+    } catch (err) {
+
+      console.log("SAVE ERROR:", err);
+
+      res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  }
+);
+
+// ================= SHOW PRODUCTS =================
+productRoute.get("/showproduct", async (req, res) => {
+
   try {
-    const products = await Product.find().select("ppicname");
 
-    const images = products
-      .map(p => p.ppicname)
-      .filter(img => img); // remove empty
+    const products = await Product.find();
 
-    res.json(images);
+    res.send(products);
+
   } catch (err) {
+
     res.status(500).json(err);
   }
 });
 
-// ================= GET =================
-productRoute.get("/showproduct", async (req, res) => {
-  res.send(await Product.find());
-});
-
+// ================= PRODUCT BY VENDOR =================
 productRoute.get("/showproductbyvender/:vid", async (req, res) => {
-  res.send(await Product.find({ vid: req.params.vid }));
-});
 
-// ✅ ADD THIS (CATEGORY FILTER)
-productRoute.get("/showproductbycatgid/:pcatgid", async (req, res) => {
-  res.send(await Product.find({ pcatgid: req.params.pcatgid }));
-});
-
-// ✅ ADD THIS (STATUS FILTER)
-productRoute.get("/showproductstatus/:status", async (req, res) => {
-  res.send(await Product.find({ status: req.params.status }));
-});
-
-// ================= UPDATE =================
-productRoute.put("/updateproduct/:pid", upload.single("file"), async (req, res) => {
   try {
-    let updateData = {
-      pname: req.body.pname,
-      pprice: req.body.pprice,
-      oprice: req.body.oprice,
-      pcatgid: req.body.pcatgid,
-      vid: req.body.vid,
-      status: req.body.status,
-    };
 
-    if (req.file) {
-      updateData.ppicname = req.file.path;
-    }
+    const products = await Product.find({
+      vid: req.params.vid,
+    });
 
-    await Product.updateOne({ pid: req.params.pid }, { $set: updateData });
-
-    res.json({ message: "Updated" });
+    res.send(products);
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+
+    res.status(500).json(err);
   }
 });
+// ================= UPDATE PRODUCT =================
+productRoute.put(
+  "/updateproduct/:pid",
 
-// ================= DELETE / STATUS =================
-productRoute.put("/updateproductstatus/:pid/:status", async (req, res) => {
-  await Product.updateOne(
-    { pid: req.params.pid },
-    { $set: { status: req.params.status } }
-  );
-  res.send("Status updated");
-});
+  upload.single("file"),
+
+  async (req, res) => {
+
+    try {
+
+      console.log("UPDATE BODY:", req.body);
+
+      console.log("UPDATE FILE:", req.file);
+
+      let updateData = {
+        pname: req.body.pname,
+        pprice: req.body.pprice,
+        oprice: req.body.oprice,
+        pcatgid: req.body.pcatgid,
+        vid: req.body.vid,
+        status: req.body.status,
+      };
+
+      // ================= NEW IMAGE =================
+      if (req.file) {
+
+        const result = await cloudinary.uploader.upload(
+          req.file.path,
+          {
+            folder: "product_images",
+          }
+        );
+
+        updateData.ppicname = result.secure_url;
+
+        // delete temp file
+        fs.unlinkSync(req.file.path);
+      }
+
+      await Product.updateOne(
+        { pid: req.params.pid },
+        { $set: updateData }
+      );
+
+      res.json({
+        success: true,
+        message: "Product Updated Successfully",
+      });
+
+    } catch (err) {
+
+      console.log("UPDATE ERROR:", err);
+
+      res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  }
+);
 
 module.exports = productRoute;

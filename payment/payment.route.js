@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const Razorpay = require("razorpay");
 const Order = require("../order/order.model");
+console.log("RAZORPAY KEY:", process.env.RAZORPAY_KEY_ID);
+console.log("RAZORPAY SECRET:", process.env.RAZORPAY_KEY_SECRET);
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
